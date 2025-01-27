@@ -15,12 +15,15 @@ import {
   createTheme,
   Autocomplete,
   Chip,
+  Tooltip,
+  Snackbar,
 } from '@mui/material';
 import { styled } from '@mui/material/styles';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import SearchIcon from '@mui/icons-material/Search';
 import VideoFileIcon from '@mui/icons-material/VideoFile';
 import DescriptionIcon from '@mui/icons-material/Description';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import { useDropzone } from 'react-dropzone';
 import ReactPlayer from 'react-player';
 import axios from 'axios';
@@ -105,6 +108,7 @@ function App() {
   const [uploadStatus, setUploadStatus] = useState('');
   const [searchLoading, setSearchLoading] = useState(false);
   const [open, setOpen] = useState(false);
+  const [snackbarOpen, setSnackbarOpen] = useState(false);
 
   const { getRootProps, getInputProps } = useDropzone({
     accept: {
@@ -233,6 +237,17 @@ function App() {
     e.preventDefault();
     debouncedSearch(searchQuery);
   }
+
+  // Function to copy transcription
+  const handleCopyTranscription = (transcription) => {
+    navigator.clipboard.writeText(transcription)
+      .then(() => {
+        setSnackbarOpen(true);
+      })
+      .catch((error) => {
+        console.error('Failed to copy text:', error);
+      });
+  };
 
   return (
     <ThemeProvider theme={theme}>
@@ -430,20 +445,38 @@ function App() {
                     Status: {video.transcriptionStatus}
                   </Typography>
                   {video.transcription && (
-                    <Typography variant="body1">
-                      Transcription: {video.transcription}
-                    </Typography>
-                  )}
-                  {video.keywords && video.keywords.length > 0 && (
-                    <Typography variant="body2" sx={{ mt: 1 }}>
-                      Keywords: {video.keywords.join(', ')}
-                    </Typography>
+                    <Box sx={{ position: 'relative', mt: 2 }}>
+                      <Typography variant="body1" sx={{ pr: 4 }}>
+                        Transcription: {video.transcription}
+                      </Typography>
+                      <Tooltip title="Copy transcription">
+                        <IconButton
+                          size="small"
+                          sx={{
+                            position: 'absolute',
+                            right: 0,
+                            top: 0,
+                          }}
+                          onClick={() => handleCopyTranscription(video.transcription)}
+                        >
+                          <ContentCopyIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    </Box>
                   )}
                 </CardContent>
               </VideoCard>
             </Grid>
           ))}
         </Grid>
+
+        <Snackbar
+          open={snackbarOpen}
+          autoHideDuration={2000}
+          onClose={() => setSnackbarOpen(false)}
+          message="Transcription copied to clipboard!"
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        />
       </Container>
     </ThemeProvider>
   );

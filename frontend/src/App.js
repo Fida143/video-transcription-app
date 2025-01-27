@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Container,
   Typography,
@@ -13,10 +13,14 @@ import {
   IconButton,
   ThemeProvider,
   createTheme,
+  Autocomplete,
+  Chip,
 } from '@mui/material';
 import { styled } from '@mui/material/styles';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import SearchIcon from '@mui/icons-material/Search';
+import VideoFileIcon from '@mui/icons-material/VideoFile';
+import DescriptionIcon from '@mui/icons-material/Description';
 import { useDropzone } from 'react-dropzone';
 import ReactPlayer from 'react-player';
 import axios from 'axios';
@@ -54,13 +58,31 @@ const DropzoneBox = styled(Paper)(({ theme }) => ({
 }));
 
 const SearchBox = styled(Paper)(({ theme }) => ({
-  padding: '2px 4px',
+  padding: '8px 16px',
   display: 'flex',
   alignItems: 'center',
   width: '100%',
   marginBottom: theme.spacing(4),
   borderRadius: '28px',
   boxShadow: '0 2px 5px rgba(0,0,0,0.1)',
+  '& .MuiAutocomplete-root': {
+    flex: 1,
+  },
+  '& .MuiInputBase-root': {
+    padding: '4px 0',
+  },
+  '& .MuiAutocomplete-input': {
+    padding: '8px 0 !important',
+    fontSize: '1rem',
+    lineHeight: '1.5',
+    height: '24px',
+  },
+  '& .MuiAutocomplete-endAdornment': {
+    right: '0',
+  },
+  '& .MuiAutocomplete-popupIndicator': {
+    display: 'none',
+  },
 }));
 
 const VideoCard = styled(Card)(({ theme }) => ({
@@ -77,9 +99,12 @@ const VideoCard = styled(Card)(({ theme }) => ({
 function App() {
   const [videos, setVideos] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [suggestions, setSuggestions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadStatus, setUploadStatus] = useState('');
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [open, setOpen] = useState(false);
 
   const { getRootProps, getInputProps } = useDropzone({
     accept: {
@@ -88,6 +113,53 @@ function App() {
     maxFiles: 1,
     onDrop: handleDrop
   });
+
+  // Debounced search function
+  const debouncedSearch = useCallback(
+    debounce(async (query) => {
+      try {
+        setSearchLoading(true);
+        if (!query.trim()) {
+          const response = await axios.get(`${API_URL}/videos`);
+          setVideos(response.data);
+        } else {
+          const response = await axios.get(`${API_URL}/videos/search?query=${query}`);
+          setVideos(response.data);
+        }
+      } catch (error) {
+        console.error('Error searching videos:', error);
+      } finally {
+        setSearchLoading(false);
+      }
+    }, 500),
+    []
+  );
+
+  // Debounced suggestions function
+  const debouncedSuggestions = useCallback(
+    debounce(async (query) => {
+      try {
+        if (!query.trim()) {
+          setSuggestions([]);
+          return;
+        }
+        const response = await axios.get(`${API_URL}/videos/suggestions?query=${query}`);
+        setSuggestions(response.data);
+      } catch (error) {
+        console.error('Error fetching suggestions:', error);
+        setSuggestions([]);
+      }
+    }, 300),
+    []
+  );
+
+  useEffect(() => {
+    debouncedSearch(searchQuery);
+  }, [searchQuery, debouncedSearch]);
+
+  useEffect(() => {
+    debouncedSuggestions(searchQuery);
+  }, [searchQuery, debouncedSuggestions]);
 
   useEffect(() => {
     fetchVideos();
@@ -143,19 +215,23 @@ function App() {
     }
   }
 
+  // Debounce function
+  function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+      const later = () => {
+        clearTimeout(timeout);
+        func(...args);
+      };
+      clearTimeout(timeout);
+      timeout = setTimeout(later, wait);
+    };
+  }
+
+  // Keep the manual search for form submission
   async function handleSearch(e) {
     e.preventDefault();
-    if (!searchQuery.trim()) {
-      fetchVideos();
-      return;
-    }
-
-    try {
-      const response = await axios.get(`${API_URL}/videos/search?query=${searchQuery}`);
-      setVideos(response.data);
-    } catch (error) {
-      console.error('Error searching videos:', error);
-    }
+    debouncedSearch(searchQuery);
   }
 
   return (
@@ -215,16 +291,106 @@ function App() {
         </DropzoneBox>
 
         <Box sx={{ mt: 4, mb: 4 }}>
-          <SearchBox>
-            <TextField
-              sx={{ ml: 1, flex: 1 }}
-              placeholder="Search transcriptions..."
+          <SearchBox component="form" onSubmit={handleSearch}>
+            <Autocomplete
+              freeSolo
+              open={open}
+              onOpen={() => setOpen(true)}
+              onClose={() => setOpen(false)}
+              options={suggestions}
+              getOptionLabel={(option) => 
+                typeof option === 'string' ? option : option.text
+              }
+              filterOptions={(x) => x}
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              variant="standard"
-              InputProps={{ disableUnderline: true }}
+              onChange={(event, newValue) => {
+                if (newValue && typeof newValue === 'object') {
+                  setSearchQuery(newValue.text);
+                  debouncedSearch(newValue.text);
+                }
+              }}
+              onInputChange={(event, newInputValue) => {
+                setSearchQuery(newInputValue);
+              }}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  placeholder="Search transcriptions..."
+                  variant="standard"
+                  InputProps={{
+                    ...params.InputProps,
+                    disableUnderline: true,
+                    endAdornment: (
+                      <>
+                        {searchLoading && <CircularProgress size={20} sx={{ mr: 1 }} />}
+                        {params.InputProps.endAdornment}
+                      </>
+                    ),
+                  }}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSearch(e);
+                    }
+                  }}
+                />
+              )}
+              ListboxProps={{
+                sx: {
+                  '& .MuiAutocomplete-option': {
+                    padding: '12px 16px',
+                  },
+                },
+              }}
+              renderOption={(props, option) => (
+                <li {...props}>
+                  <Box sx={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    width: '100%',
+                    py: 0.5
+                  }}>
+                    {option.type === 'filename' ? (
+                      <VideoFileIcon sx={{ mr: 2, color: 'primary.main' }} />
+                    ) : (
+                      <DescriptionIcon sx={{ mr: 2, color: 'secondary.main' }} />
+                    )}
+                    <Box sx={{ flexGrow: 1 }}>
+                      <Typography variant="body1" sx={{ mb: 0.5 }}>
+                        {option.text}
+                      </Typography>
+                      <Typography 
+                        variant="caption" 
+                        color="text.secondary"
+                        sx={{ display: 'block' }}
+                      >
+                        {option.type === 'filename' ? 'Video Name' : 'From Transcription'}
+                      </Typography>
+                    </Box>
+                  </Box>
+                </li>
+              )}
+              PaperComponent={({ children }) => (
+                <Paper 
+                  elevation={3}
+                  sx={{ 
+                    mt: 1,
+                    borderRadius: 2,
+                    '& .MuiAutocomplete-listbox': {
+                      padding: '8px',
+                    },
+                  }}
+                >
+                  {children}
+                </Paper>
+              )}
             />
-            <IconButton type="button" sx={{ p: '10px' }} aria-label="search">
+            <IconButton 
+              type="submit" 
+              sx={{ p: '12px', ml: 1 }} 
+              aria-label="search"
+              disabled={searchLoading}
+            >
               <SearchIcon />
             </IconButton>
           </SearchBox>

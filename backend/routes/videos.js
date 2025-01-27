@@ -66,15 +66,92 @@ router.get('/', async (req, res) => {
 router.get('/search', async (req, res) => {
   try {
     const { query } = req.query;
+    if (!query || query.trim() === '') {
+      const videos = await Video.find().sort({ uploadDate: -1 });
+      return res.json(videos);
+    }
+
+    const searchRegex = new RegExp(query.trim(), 'i');
     const videos = await Video.find({
       $or: [
-        { transcription: { $regex: query, $options: 'i' } },
-        { originalName: { $regex: query, $options: 'i' } }
+        { transcription: { $regex: searchRegex } },
+        { originalName: { $regex: searchRegex } }
       ]
-    });
+    }).sort({ uploadDate: -1 });
+
+    console.log(`Search query: "${query}" found ${videos.length} results`);
     res.json(videos);
   } catch (error) {
     console.error('Search error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get search suggestions
+router.get('/suggestions', async (req, res) => {
+  try {
+    const { query } = req.query;
+    if (!query || query.trim() === '') {
+      return res.json([]);
+    }
+
+    const searchRegex = new RegExp(query.trim(), 'i');
+    const videos = await Video.find({
+      $or: [
+        { transcription: { $regex: searchRegex } },
+        { originalName: { $regex: searchRegex } }
+      ]
+    }).limit(5);
+
+    // Extract suggestions from videos
+    const suggestions = videos.reduce((acc, video) => {
+      // Add filename-based suggestion
+      if (video.originalName.match(searchRegex)) {
+        acc.push({
+          type: 'filename',
+          text: video.originalName,
+          videoId: video._id
+        });
+      }
+
+      // Add transcription-based suggestions
+      if (video.transcription) {
+        const words = video.transcription.split(/\s+/);
+        const matchingPhrases = [];
+        
+        // Find matching phrases (up to 5 words)
+        for (let i = 0; i < words.length; i++) {
+          for (let j = 1; j <= 5 && i + j <= words.length; j++) {
+            const phrase = words.slice(i, i + j).join(' ');
+            if (phrase.match(searchRegex)) {
+              matchingPhrases.push(phrase);
+              if (matchingPhrases.length >= 3) break;
+            }
+          }
+          if (matchingPhrases.length >= 3) break;
+        }
+
+        matchingPhrases.forEach(phrase => {
+          acc.push({
+            type: 'transcription',
+            text: phrase,
+            videoId: video._id
+          });
+        });
+      }
+
+      return acc;
+    }, []);
+
+    // Remove duplicates and limit to 5 suggestions
+    const uniqueSuggestions = Array.from(new Set(suggestions.map(s => s.text)))
+      .slice(0, 5)
+      .map(text => suggestions.find(s => s.text === text));
+
+    console.log(`Suggestions for "${query}":`, uniqueSuggestions);
+    res.json(uniqueSuggestions);
+  } catch (error) {
+    console.error('Suggestions error:', error);
     res.status(500).json({ error: error.message });
   }
 });
